@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PMPML Transit Assistant (Demo)</title>
+<style>
+:root{--bg:#000;--fg:#fff;--accent:#FFD600;--panel:#121212;--line:#9a9a9a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:1.15rem/1.55 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left));
+  max-width:560px;margin-inline:auto}
+header{border-bottom:3px solid var(--accent);padding-bottom:10px}
+h1{font-size:1.6rem;line-height:1.2;margin:.1em 0 .2em}
+header p{margin:0}
+h2{font-size:1.25rem;color:var(--accent);margin:0 0 .5em}
+section{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;margin:16px 0}
+label{display:block;font-weight:700;margin:.6em 0 .3em}
+input,select,button{font:inherit;min-height:64px;border-radius:14px;border:3px solid var(--line);padding:8px 14px;background:#000;color:var(--fg);width:100%}
+button{cursor:pointer;font-weight:700;touch-action:manipulation}
+button:active{transform:scale(.98)}
+button.primary{background:var(--accent);color:#000;border-color:var(--accent)}
+.wide{margin-top:12px}
+.mic{min-height:150px;font-size:1.9rem;border-radius:24px;background:var(--accent);color:#000;border-color:#fff;margin:16px 0 8px}
+.mic:disabled{background:#333;color:#fff;border-color:var(--line);font-size:1.2rem}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.row.one{grid-template-columns:1fr}
+:focus-visible{outline:5px solid var(--accent);outline-offset:3px}
+.mic:focus-visible,button.primary:focus-visible{outline-color:#fff}
+#voiceStatus{margin:.4em 0 0;min-height:1.5em}
+#log{max-height:45vh;overflow:auto;padding:0;margin:0;list-style:none;-webkit-overflow-scrolling:touch}
+#log li{border-top:2px solid #555;padding:12px 2px}
+#log li:first-child{border-top:0}
+.who{font-weight:700;color:var(--accent)}
+#log ol{margin:.3em 0 0;padding-left:1.5em}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<a class="sr-only" href="#query" aria-label="Skip to the question box">Skip to question box</a>
+<header>
+  <h1>PMPML Transit Assistant</h1>
+  <p>Voice and text help for riding PMPML buses in Pune. Answers are read aloud automatically.</p>
+</header>
+
+<main>
+<section aria-labelledby="ask-h">
+  <h2 id="ask-h">Ask a question</h2>
+  <label for="stop">Your bus stop</label>
+  <select id="stop" aria-label="Choose the bus stop where you are standing now"></select>
+  <button type="button" id="mic" class="mic" aria-label="Start voice input and speak your question">Tap to speak</button>
+  <p id="voiceStatus" role="status"></p>
+  <form id="form" autocomplete="off">
+    <label for="query">Or type your question</label>
+    <input type="text" id="query" aria-label="Type your question, for example: when is the next bus" placeholder="When is the next bus">
+    <button type="submit" class="primary wide" aria-label="Send your typed question to the assistant">Send</button>
+  </form>
+</section>
+
+<section aria-labelledby="quick-h">
+  <h2 id="quick-h">Quick actions</h2>
+  <div class="row">
+    <button type="button" id="qNext" aria-label="Get the next buses arriving at your selected stop">Next buses</button>
+    <button type="button" id="qBoard" aria-label="Hear step by step instructions for boarding a bus">How to board</button>
+    <button type="button" id="qOff" aria-label="Hear step by step instructions for getting off a bus">How to get off</button>
+    <button type="button" id="qRepeat" aria-label="Repeat the last answer aloud">Repeat</button>
+    <button type="button" id="qHelp" aria-label="Hear what you can ask the assistant">Help</button>
+    <button type="button" id="qStop" aria-label="Stop the voice from speaking right now">Stop speaking</button>
+  </div>
+  <div class="row one">
+    <button type="button" id="voiceToggle" aria-pressed="true" aria-label="Speak answers aloud, currently on. Press to turn off">Speak answers aloud: On</button>
+    <div>
+      <label for="rate">Speech speed</label>
+      <select id="rate" aria-label="Choose how fast the assistant speaks">
+        <option value="0.8">Slow</option><option value="1" selected>Normal</option><option value="1.3">Fast</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="log-h">
+  <h2 id="log-h">Conversation transcript</h2>
+  <ul id="log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation transcript, new messages are announced automatically" tabindex="0"></ul>
+</section>
+</main>
+
+<script>
+"use strict";
+/* ============ 1. DATA LAYER (swap this class for a real PMPML / ITMS / GTFS-RT feed) ============
+   Contract: getStops() -> string[]
+             getArrivals(stop) -> [{route, destination, etaMin, live, door}]   (door: "front"|"middle")
+             getRouteStops(route) -> string[] | null                            */
+class TransitProvider {
+  async getStops(){throw new Error("not implemented")}
+  async getArrivals(stop){throw new Error("not implemented")}
+  async getRouteStops(route){throw new Error("not implemented")}
+  get isDemo(){return true}
+}
+class DemoTransitProvider extends TransitProvider {
+  constructor(){super();this.routes={
+    "333":["Katraj","Swargate","Deccan Gymkhana","Shivajinagar","Aundh"],
+    "144":["Pune Station","Swargate","Hadapsar"],
+    "201":["Shivajinagar","Pune Station","Hadapsar"],
+    "98":["Swargate","Deccan Gymkhana","Kothrud Depot"]}}
+  hash(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return h}
+  async getStops(){return [...new Set(Object.values(this.routes).flat())].sort()}
+  async getRouteStops(r){return this.routes[r]||null}
+  async getArrivals(stop){
+    const out=[],nowMin=Date.now()/60000;
+    for(const [route,seq] of Object.entries(this.routes)){
+      const i=seq.indexOf(stop);if(i<0)continue;
+      const dirs=[];if(i<seq.length-1)dirs.push(seq[seq.length-1]);if(i>0)dirs.push(seq[0]);
+      for(const dest of dirs){
+        const h=this.hash(route+stop+dest),headway=8+h%10,offset=h%headway;
+        const eta=Math.ceil((((offset-nowMin)%headway)+headway)%headway);
+        out.push({route,destination:dest,etaMin:eta,live:h%3!==0,door:h%2?"front":"middle"});
+      }}
+    return out.sort((a,b)=>a.etaMin-b.etaMin);
+  }
+}
+const provider=new DemoTransitProvider();   // <- swap here for a real provider
+
+/* ============ 2. PERSONA / GUARDRAIL LAYER ============ */
+const VISUAL=/\b(look(ing)?\s+(for|at|out)|see|seen|sees|visible|visibly|colou?rs?|red|green|blue|yellow|white|black|orange|bright|signboard|sign|landmark|display|screen shows?|watch for)\b/i;
+function guard(step){
+  if(VISUAL.test(step)){console.warn("Guardrail blocked visual wording:",step);
+    return "Ask the driver or conductor to confirm the route number aloud before you board.";}
+  return step;
+}
+const when=a=>a.etaMin<=0?"arriving now":a.etaMin===1?"in about 1 minute":`in about ${a.etaMin} minutes`;
+const doorCue=a=>a.door==="front"
+  ?"The boarding door is at the front, on the bus's left side. As the bus stops facing your left, slide your hand along the body toward your left to find it."
+  :"The boarding door is in the middle, on the bus's left side. As the bus stops, the door is roughly in front of you.";
+
+const PERSONA={
+  help:()=>["You can ask: when is the next bus.","Ask: when is route 333.","Ask: how do I board.","Ask: how many stops from Swargate to Shivajinagar.","Ask: how do I get off.","Say repeat to hear the last answer again."],
+  board:()=>["Stand beside the stop pole. Find it with your cane or hand.","Face the road. In Pune, traffic keeps left, so buses arrive from your right side.","Listen for an engine slowing down and a hiss of air brakes. That means a bus is stopping.","Ask the driver or conductor to call out the route number. Do not board until you hear it.","The bus's door side is its left side. It will be next to you. Move your hand along the bus body to find the door edge.","Grip the vertical handrail. Probe the first step with your cane or foot, then step up.","Tell the conductor your stop and ask for a seat or a place near the front."],
+  off:()=>["Before your stop, ask the conductor or a neighbouring rider to tell you when it is the stop before yours.","Count the stops yourself too. Each time the bus slows and the door opens, count one.","At the stop before yours, stand and keep one hand on the overhead rail or seat back.","Move toward the exit door, which is on the left side of the bus.","At the door, hold the handrail and probe downward with your cane for the step and the kerb.","Step down, then turn to face the road. Buses will pass from your right."],
+  async arrivals(stop,route){
+    let list=await provider.getArrivals(stop);if(route)list=list.filter(a=>a.route===route);
+    if(!list.length)return [`There are no buses${route?" for route "+route:""} listed at ${stop} in the demo data.`,"Try another stop or another route number."];
+    const top=list.slice(0,3),s=[`You are at ${stop}. Facing the road, buses arrive from your right.`];
+    top.forEach(a=>s.push(`Route ${a.route} to ${a.destination}, ${when(a)}. ${a.live?"This time is live-tracked.":"This time is scheduled only, so the bus may be late or may not run."} ${doorCue(a)}`));
+    s.push("Listen for the engine slowing, and ask the driver to confirm the route number before you board.");
+    s.push("Reminder: this is simulated demo data, not live PMPML tracking.");
+    return s;
+  },
+  async count(from,to){
+    for(const r of Object.keys(provider.routes||{})){const seq=await provider.getRouteStops(r),a=seq.indexOf(from),b=seq.indexOf(to);
+      if(a>=0&&b>=0&&a!==b){const n=Math.abs(a-b);
+        return [`Take route ${r} from ${from} toward ${a<b?seq[seq.length-1]:seq[0]}.`,`After boarding, sit or hold a rail. Count each time the bus stops and the door opens.`,`${to} is stop number ${n} after ${from}. That is ${n} stop${n>1?"s":""} counting from the first stop after you board.`,`When you have counted ${n-1}, get ready to stand, because the next stop is yours.`,"Ask the conductor to confirm. Demo data only; stop sequences may differ in real service."];}}
+    return [`The demo data has no single route linking ${from} and ${to}.`,"Try two stops on the same route, for example Swargate and Shivajinagar."];
+  }
+};
+
+/* ============ 3. SPEECH OUTPUT ============ */
+const synth=window.speechSynthesis;let voiceOn=!!synth,rate=1;
+function speak(text){
+  if(!synth||!voiceOn)return;
+  text.split(/(?<=[.?!])\s+/).forEach(chunk=>{if(!chunk.trim())return;
+    const u=new SpeechSynthesisUtterance(chunk);u.lang="en-IN";u.rate=rate;synth.speak(u)});
+}
+
+/* ============ 4. TRANSCRIPT ============ */
+const logEl=document.getElementById("log");let lastSteps=null;
+function addEntry(who,steps){
+  const li=document.createElement("li"),w=document.createElement("span");
+  w.className="who";w.textContent=who==="you"?"You said: ":"Assistant: ";li.appendChild(w);
+  if(steps.length===1)li.appendChild(document.createTextNode(steps[0]));
+  else{const ol=document.createElement("ol");steps.forEach(s=>{const x=document.createElement("li");x.textContent=s;ol.appendChild(x)});li.appendChild(ol)}
+  logEl.appendChild(li);logEl.scrollTop=logEl.scrollHeight;
+}
+function say(steps){
+  steps=steps.map(guard);lastSteps=steps;addEntry("bot",steps);
+  speak(steps.length===1?steps[0]:steps.map(s=>/[.!?]$/.test(s)?s:s+".").join(" "));
+}
+
+/* ============ 5. QUERY HANDLING ============ */
+const stopSel=document.getElementById("stop"),input=document.getElementById("query");
+async function ask(q){
+  q=q.trim();if(!q)return;addEntry("you",[q]);if(synth)synth.cancel();
+  const low=q.toLowerCase(),stops=await provider.getStops();
+  const found=stops.filter(s=>low.includes(s.toLowerCase())).sort((a,b)=>low.indexOf(a.toLowerCase())-low.indexOf(b.toLowerCase()));
+  const route=(low.match(/\b(\d{2,3})\b/)||[])[1],known=route&&provider.routes&&provider.routes[route]?route:null;
+  if(/\brepeat|again\b/.test(low)&&lastSteps)return say(lastSteps);
+  if(/\bhelp|what can i ask\b/.test(low))return say(PERSONA.help());
+  if(/how many stops|stops from|stops to/.test(low)&&found.length>=2)return say(await PERSONA.count(found[0],found[1]));
+  if(/get off|alight|exit|my stop/.test(low))return say(PERSONA.off());
+  if(/board|get on|enter|climb/.test(low))return say(PERSONA.board());
+  if(/bus|next|when|arriv|time|eta|route|\d{2,3}/.test(low))return say(await PERSONA.arrivals(found[0]||stopSel.value,known));
+  say(["I did not understand that.","Try asking: when is the next bus. Or say help."]);
+}
+
+/* ============ 6. UI WIRING ============ */
+document.getElementById("form").addEventListener("submit",e=>{e.preventDefault();const v=input.value;input.value="";ask(v)});
+const bind=(id,fn)=>document.getElementById(id).addEventListener("click",fn);
+bind("qNext",()=>ask("when is the next bus"));bind("qBoard",()=>ask("how do I board"));
+bind("qOff",()=>ask("how do I get off"));bind("qHelp",()=>ask("help"));
+bind("qRepeat",()=>{if(synth)synth.cancel();lastSteps?say(lastSteps):say(["There is nothing to repeat yet."])});
+bind("qStop",()=>{if(synth)synth.cancel()});
+const vt=document.getElementById("voiceToggle");
+vt.addEventListener("click",()=>{voiceOn=!voiceOn&&!!synth;if(!voiceOn&&synth)synth.cancel();
+  vt.setAttribute("aria-pressed",voiceOn);vt.textContent="Speak answers aloud: "+(voiceOn?"On":"Off");
+  vt.setAttribute("aria-label",`Speak answers aloud, currently ${voiceOn?"on":"off"}. Press to turn ${voiceOn?"off":"on"}`)});
+document.getElementById("rate").addEventListener("change",e=>rate=parseFloat(e.target.value));
+
+/* Voice input (SpeechRecognition) with graceful fallback */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mic=document.getElementById("mic"),vs=document.getElementById("voiceStatus");
+if(!SR){mic.disabled=true;mic.setAttribute("aria-label","Voice input is not available in this browser. Use the text box instead.");
+  vs.textContent="Voice input is not supported in this browser. Please type your question, or open this page in Chrome or Edge.";}
+else{
+  vs.textContent="Voice input is available in this browser. It needs an internet connection.";
+  mic.addEventListener("click",()=>{
+    if(synth)synth.cancel();
+    const r=new SR();r.lang="en-IN";r.interimResults=false;r.maxAlternatives=1;
+    r.onstart=()=>{mic.textContent="Listening…";vs.textContent="Listening. Speak your question now."};
+    r.onresult=e=>{const t=e.results[0][0].transcript;vs.textContent="Heard: "+t;ask(t)};
+    r.onerror=e=>{vs.textContent=e.error==="not-allowed"?"Microphone permission was denied. Please allow it or type your question.":
+      e.error==="network"?"Voice input needs an internet connection. Please type your question.":"Voice input problem: "+e.error+". Please try again or type."};
+    r.onend=()=>{mic.textContent="Tap to speak";if(vs.textContent.startsWith("Listening"))vs.textContent="No speech heard. Press Speak to try again."};
+    try{r.start()}catch(err){vs.textContent="Could not start voice input. Please try again."}
+  });
+}
+
+/* Init */
+(async()=>{
+  for(const s of await provider.getStops()){const o=document.createElement("option");o.value=o.textContent=s;stopSel.appendChild(o)}
+  stopSel.value="Swargate";
+  const welcome=["Welcome to the PMPML Transit Assistant demo.","Bus times are simulated, not live.","Choose your stop, then ask when is the next bus, or say help."];
+  const note=synth?"":" Speech output is not supported in this browser; read the transcript instead.";
+  addEntry("bot",[welcome.join(" ")+note]);
+  if(synth){speak(welcome.join(" "));
+    // Some browsers block speech until the first user action; speak welcome once then.
+    const once=()=>{if(!synth.speaking&&!synth.pending&&!lastSteps)speak(welcome.join(" "));
+      removeEventListener("pointerdown",once);removeEventListener("keydown",once)};
+    addEventListener("pointerdown",once);addEventListener("keydown",once);}
+})();
+</script>
+</body>
+</html>
